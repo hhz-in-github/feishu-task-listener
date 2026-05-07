@@ -9,5 +9,12 @@
   "processed_message_path": "processed_message_ids.txt",
   "processed_card_action_path": "processed_card_action_ids.txt",
   "processed_alert_path": "processed_alert_ids.txt",
-  "raw_event_path": "runtime_events.ndjson"
+  "raw_event_path": "runtime_events.ndjson",
+  "location_base_url": "https://your-domain.example.com",
+  "location_signing_secret": "CHANGE_ME_TO_A_RANDOM_SECRET",
+  "location_claim_field": "出发位置",
+  "location_resolve_field": "救援结束位置",
+  "location_value_mode": "location",
+  "location_bind_host": "0.0.0.0",
+  "location_port": 8000
 }

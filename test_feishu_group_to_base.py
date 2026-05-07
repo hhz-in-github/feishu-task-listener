@@ -9,6 +9,8 @@ from feishu_group_to_base import (
     alert_creator,
     build_creator_alert_card,
     build_base_table_url,
+    build_location_action_url,
+    build_location_update,
     build_user_authorization_alert_reason,
     build_task_card,
     build_creator_alert_text,
@@ -20,6 +22,7 @@ from feishu_group_to_base import (
     parse_event,
     parse_record_id_from_output,
     send_task_card,
+    verify_location_action,
 )
 
 
@@ -124,6 +127,40 @@ class ParseEventTests(unittest.TestCase):
         self.assertEqual(actions[0]["text"]["content"], "领取任务")
         self.assertEqual(actions[0]["disabled"], True)
         self.assertNotIn("disabled", actions[1])
+
+    def test_builds_location_button_urls_when_configured(self):
+        record = {
+            "消息原文": "@救援工单 @陈福艳 0412救援，换电",
+            "车牌号": "0412",
+            "任务类型": ["救援", "换电"],
+            "任务发布时间": "2026-05-05 01:58:52",
+        }
+
+        with patch("feishu_group_to_base.LOCATION_BASE_URL", "https://loc.example.com"):
+            card = build_task_card(record, "rec_123")
+
+        actions = card["elements"][1]["actions"]
+        self.assertIn("https://loc.example.com/location?action=claim", actions[0]["url"])
+        self.assertIn("record_id=rec_123", actions[0]["url"])
+        self.assertNotIn("value", actions[0])
+
+    def test_verifies_location_action_token(self):
+        url = build_location_action_url("claim", "rec_123")
+        token = url.split("token=", 1)[1]
+
+        self.assertTrue(verify_location_action("claim", "rec_123", token))
+        self.assertFalse(verify_location_action("resolve", "rec_123", token))
+
+    def test_builds_location_update_for_claim_and_resolve(self):
+        claim = build_location_update("claim", 31.2304, 121.4737, 35)
+        resolve = build_location_update("resolve", 31.2305, 121.4738, 40)
+
+        self.assertEqual(claim["任务状态"], "处理中")
+        self.assertIn("任务领取时间", claim)
+        self.assertEqual(claim["出发位置"], {"lng": 121.4737, "lat": 31.2304})
+        self.assertEqual(resolve["任务状态"], "已解决")
+        self.assertIn("任务解决时间", resolve)
+        self.assertEqual(resolve["救援结束位置"], {"lng": 121.4738, "lat": 31.2305})
 
     def test_parses_card_action_value(self):
         event = {
