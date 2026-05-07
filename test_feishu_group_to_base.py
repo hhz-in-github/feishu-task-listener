@@ -9,11 +9,13 @@ from feishu_group_to_base import (
     alert_creator,
     build_creator_alert_card,
     build_base_table_url,
+    build_user_authorization_alert_reason,
     build_task_card,
     build_creator_alert_text,
     handle_card_action_event,
     handle_event,
     is_bot_availability_error,
+    is_user_authorization_error,
     parse_card_action,
     parse_event,
     parse_record_id_from_output,
@@ -285,6 +287,63 @@ class ParseEventTests(unittest.TestCase):
         message = "HTTP 400: Bot has NO availability to this user."
 
         self.assertTrue(is_bot_availability_error(message))
+
+    def test_detects_user_authorization_error(self):
+        message = """
+        Failed to write Base record
+        STDERR:
+        {"error": {"message": "API call failed: need_user_authorization (user: )"}}
+        """
+
+        self.assertTrue(is_user_authorization_error(message))
+
+    @patch("feishu_group_to_base.alert_creator")
+    @patch("feishu_group_to_base.write_record_with_fallback")
+    def test_user_authorization_error_alerts_with_reauth_hint(
+        self,
+        write_record,
+        alert_creator,
+    ):
+        write_record.side_effect = RuntimeError(
+            "API call failed: need_user_authorization (user: )"
+        )
+        event = {
+            "header": {"event_type": "im.message.receive_v1"},
+            "event": {
+                "message": {
+                    "chat_id": "test_chat_id",
+                    "content": "{\"text\":\"@_user_1 @_user_2 7757救援\"}",
+                    "create_time": "1777952509450",
+                    "mentions": [
+                        {
+                            "id": {"open_id": "test_bot_open_id"},
+                            "key": "@_user_1",
+                            "mentioned_type": "bot",
+                            "name": "救援工单",
+                        },
+                        {
+                            "id": {"open_id": "test_user_open_id"},
+                            "key": "@_user_2",
+                            "mentioned_type": "user",
+                            "name": "黄贵杰",
+                        },
+                    ],
+                    "message_id": "om_auth",
+                    "message_type": "text",
+                }
+            },
+        }
+
+        with self.assertRaises(RuntimeError):
+            handle_event(event, set(), set(), "lark-cli.cmd")
+
+        alert_creator.assert_called_once_with(
+            "test_chat_id",
+            "@救援工单 @黄贵杰 7757救援",
+            "lark-cli.cmd",
+            reason=build_user_authorization_alert_reason(),
+            dedupe_key="user_authorization:om_auth",
+        )
 
     def test_builds_creator_alert_text_with_only_chat_and_original_message(self):
         text = build_creator_alert_text("救援群", "@救援工单 缺少车牌")

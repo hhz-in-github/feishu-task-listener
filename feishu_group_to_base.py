@@ -307,12 +307,21 @@ def handle_event(
                 print("Skip card send: no assignee open_id", file=sys.stderr)
         except RuntimeError as exc:
             if not alerted:
+                reason = (
+                    build_user_authorization_alert_reason()
+                    if is_user_authorization_error(str(exc))
+                    else f"多维表格处理失败：{exc}"
+                )
                 alert_creator(
                     chat_id,
                     original_message,
                     lark_cli,
-                    reason=f"多维表格处理失败：{exc}",
-                    dedupe_key=f"message:{message_id}:runtime",
+                    reason=reason,
+                    dedupe_key=(
+                        f"user_authorization:{message_id}"
+                        if is_user_authorization_error(str(exc))
+                        else f"message:{message_id}:runtime"
+                    ),
                 )
             update_health(status="error", last_error=str(exc), last_error_at=now_iso())
             log_event("message_processing_failed", message_id=message_id, chat_id=chat_id, error=str(exc))
@@ -375,12 +384,21 @@ def handle_card_action_event(
             else:
                 print("Skip card disable update: no message_id in action event", file=sys.stderr)
         except RuntimeError as exc:
+            reason = (
+                build_user_authorization_alert_reason()
+                if is_user_authorization_error(str(exc))
+                else f"按钮回写失败：{exc}"
+            )
             alert_creator(
                 action.get("群聊ID"),
                 action.get("消息原文", f"卡片动作：{action['action']}"),
                 lark_cli,
-                reason=f"按钮回写失败：{exc}",
-                dedupe_key=f"card_action:{event_id or action['record_id']}:{action['action']}",
+                reason=reason,
+                dedupe_key=(
+                    f"user_authorization:{event_id or action['record_id']}"
+                    if is_user_authorization_error(str(exc))
+                    else f"card_action:{event_id or action['record_id']}:{action['action']}"
+                ),
             )
             update_health(status="error", last_error=str(exc), last_error_at=now_iso())
             log_event("card_action_failed", event_id=event_id, action=action, error=str(exc))
@@ -431,7 +449,9 @@ def write_record(record: dict[str, Any], lark_cli: str) -> str:
 def write_record_with_fallback(record: dict[str, Any], lark_cli: str) -> str:
     try:
         return write_record(record, lark_cli)
-    except RuntimeError:
+    except RuntimeError as exc:
+        if is_user_authorization_error(str(exc)):
+            raise
         if "执行人" not in record:
             raise
 
@@ -659,6 +679,29 @@ def _send_card(target_args: list[str], card: dict[str, Any], lark_cli: str) -> N
 
 def is_bot_availability_error(message: str) -> bool:
     return "Bot has NO availability to this user" in message
+
+
+def is_user_authorization_error(message: str) -> bool:
+    markers = (
+        "need_user_authorization",
+        "user authorization",
+        "user_access_token",
+        "refresh token",
+        "token expired",
+        "invalid access token",
+        "Access token is invalid",
+    )
+    lowered = message.lower()
+    return any(marker.lower() in lowered for marker in markers)
+
+
+def build_user_authorization_alert_reason() -> str:
+    return (
+        "服务器飞书用户授权已失效，请在服务器项目目录重新执行："
+        "lark-cli auth login --scope "
+        "\"base:record:create base:record:update base:record:read "
+        "base:field:read base:table:read offline_access\""
+    )
 
 
 def build_task_card(
