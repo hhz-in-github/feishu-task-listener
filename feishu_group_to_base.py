@@ -246,12 +246,19 @@ def handle_event(
         print(f"Skip duplicate message: {message_id}", file=sys.stderr)
         log_event("skip_duplicate_message", message_id=message_id, chat_id=chat_id)
         return
+    mentions = message.get("mentions") or []
+    if not _mentions_bot(mentions):
+        print(f"Skip message without bot mention: {message_id}", file=sys.stderr)
+        log_event("skip_message_without_bot_mention", message_id=message_id, chat_id=chat_id)
+        processed_ids.add(message_id)
+        _append_processed_id(message_id)
+        return
 
     record = parse_event(event)
-    assignee_open_id = _first_user_mention_open_id(message.get("mentions") or [])
+    assignee_open_id = _first_user_mention_open_id(mentions)
     original_message = str(record.get("消息原文") or _replace_mentions(
         _extract_text(message.get("content", "")),
-        message.get("mentions") or [],
+        mentions,
     ))
     if dry_run:
         print(json.dumps(record, ensure_ascii=False), flush=True)
@@ -942,6 +949,10 @@ def _first_user_mention_open_id(mentions: list[dict[str, Any]]) -> str | None:
         if open_id:
             return str(open_id)
     return None
+
+
+def _mentions_bot(mentions: list[dict[str, Any]]) -> bool:
+    return any(mention.get("mentioned_type") == "bot" for mention in mentions)
 
 
 def _extract_vehicle_number(text: str) -> str | None:

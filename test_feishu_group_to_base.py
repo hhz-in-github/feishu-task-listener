@@ -241,6 +241,37 @@ class ParseEventTests(unittest.TestCase):
         )
         send_task_card.assert_not_called()
 
+    @patch("feishu_group_to_base.send_task_card")
+    @patch("feishu_group_to_base.alert_creator")
+    @patch("feishu_group_to_base.write_record_with_fallback")
+    def test_message_without_bot_mention_is_ignored(
+        self,
+        write_record,
+        alert_creator,
+        send_task_card,
+    ):
+        event = {
+            "header": {"event_type": "im.message.receive_v1"},
+            "event": {
+                "message": {
+                    "chat_id": "test_chat_id",
+                    "content": "{\"text\":\"随便聊一下 0412 救援\"}",
+                    "create_time": "1777952509450",
+                    "mentions": [],
+                    "message_id": "om_without_bot",
+                    "message_type": "text",
+                }
+            },
+        }
+        processed_ids: set[str] = set()
+
+        handle_event(event, processed_ids, set(), "lark-cli.cmd")
+
+        write_record.assert_not_called()
+        alert_creator.assert_not_called()
+        send_task_card.assert_not_called()
+        self.assertIn("om_without_bot", processed_ids)
+
     @patch("feishu_group_to_base.alert_creator")
     @patch("feishu_group_to_base.update_record")
     def test_alerts_creator_when_card_action_update_fails(self, update_record, alert_creator):
