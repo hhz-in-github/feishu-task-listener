@@ -1,6 +1,4 @@
 import argparse
-import hashlib
-import hmac
 import json
 import re
 import subprocess
@@ -8,7 +6,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 
@@ -26,13 +23,6 @@ DEFAULT_CONFIG = {
     "processed_card_action_path": "processed_card_action_ids.txt",
     "processed_alert_path": "processed_alert_ids.txt",
     "raw_event_path": "runtime_events.ndjson",
-    "location_base_url": "",
-    "location_signing_secret": "CHANGE_ME",
-    "location_claim_field": "出发位置",
-    "location_resolve_field": "救援结束位置",
-    "location_value_mode": "location",
-    "location_bind_host": "0.0.0.0",
-    "location_port": 8000,
 }
 DEFAULT_TASK_TYPE_SPECS = [
     {"name": "被堵住出不来（保安/警戒线/锥桶）", "keywords": ["被堵住出不来", "保安", "警戒线", "锥桶"]},
@@ -89,13 +79,6 @@ TABLE_ID = str(CONFIG["table_id"])
 BASE_HOST = str(CONFIG["base_host"]).rstrip("/")
 TIMEZONE = ZoneInfo(str(CONFIG["timezone"]))
 BOT_CREATOR_OPEN_ID = str(CONFIG["bot_creator_open_id"])
-LOCATION_BASE_URL = str(CONFIG.get("location_base_url") or "").rstrip("/")
-LOCATION_SIGNING_SECRET = str(CONFIG.get("location_signing_secret") or "CHANGE_ME")
-LOCATION_CLAIM_FIELD = str(CONFIG.get("location_claim_field") or "出发位置")
-LOCATION_RESOLVE_FIELD = str(CONFIG.get("location_resolve_field") or "救援结束位置")
-LOCATION_VALUE_MODE = str(CONFIG.get("location_value_mode") or "location")
-LOCATION_BIND_HOST = str(CONFIG.get("location_bind_host") or "0.0.0.0")
-LOCATION_PORT = int(CONFIG.get("location_port") or 8000)
 
 PROCESSED_LOG = Path(str(CONFIG["processed_message_path"]))
 PROCESSED_CARD_ACTION_LOG = Path(str(CONFIG["processed_card_action_path"]))
@@ -742,17 +725,7 @@ def build_task_card(
         "tag": "button",
         "text": {"tag": "plain_text", "content": "领取任务"},
         "type": "primary",
-    }
-    resolve_button = {
-        "tag": "button",
-        "text": {"tag": "plain_text", "content": "已解决"},
-        "type": "danger",
-    }
-    if LOCATION_BASE_URL:
-        claim_button["url"] = build_location_action_url("claim", record_id)
-        resolve_button["url"] = build_location_action_url("resolve", record_id)
-    else:
-        claim_button["value"] = _button_value(
+        "value": _button_value(
             action="claim",
             record_id=record_id,
             vehicle=vehicle,
@@ -760,8 +733,13 @@ def build_task_card(
             published_at=published_at,
             original=original,
             chat_id=chat_id,
-        )
-        resolve_button["value"] = _button_value(
+        ),
+    }
+    resolve_button = {
+        "tag": "button",
+        "text": {"tag": "plain_text", "content": "已解决"},
+        "type": "danger",
+        "value": _button_value(
             action="resolve",
             record_id=record_id,
             vehicle=vehicle,
@@ -769,7 +747,8 @@ def build_task_card(
             published_at=published_at,
             original=original,
             chat_id=chat_id,
-        )
+        ),
+    }
     if "claim" in disabled_actions:
         claim_button["disabled"] = True
     if "resolve" in disabled_actions:
@@ -830,46 +809,6 @@ def _button_value(
 
 def build_base_table_url() -> str:
     return f"{BASE_HOST}/base/{BASE_TOKEN}?table={TABLE_ID}"
-
-
-def build_location_action_url(action: str, record_id: str) -> str:
-    token = sign_location_action(action, record_id)
-    query = urlencode({"action": action, "record_id": record_id, "token": token})
-    return f"{LOCATION_BASE_URL}/location?{query}"
-
-
-def sign_location_action(action: str, record_id: str) -> str:
-    message = f"{action}:{record_id}".encode("utf-8")
-    return hmac.new(
-        LOCATION_SIGNING_SECRET.encode("utf-8"),
-        message,
-        hashlib.sha256,
-    ).hexdigest()
-
-
-def verify_location_action(action: str, record_id: str, token: str) -> bool:
-    if action not in {"claim", "resolve"} or not record_id or not token:
-        return False
-    expected = sign_location_action(action, record_id)
-    return hmac.compare_digest(expected, token)
-
-
-def build_location_update(
-    action: str,
-    latitude: float,
-    longitude: float,
-    accuracy: float | None = None,
-) -> dict[str, Any]:
-    update = build_action_update(action)
-    field_name = LOCATION_CLAIM_FIELD if action == "claim" else LOCATION_RESOLVE_FIELD
-    if LOCATION_VALUE_MODE == "text":
-        value = f"{latitude:.6f},{longitude:.6f}"
-        if accuracy is not None:
-            value += f"（精度 {accuracy:.0f} 米）"
-    else:
-        value = {"lng": longitude, "lat": latitude}
-    update[field_name] = value
-    return update
 
 
 def parse_card_action(event: dict[str, Any]) -> dict[str, str] | None:
