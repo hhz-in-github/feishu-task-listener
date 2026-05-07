@@ -244,6 +244,53 @@ class ParseEventTests(unittest.TestCase):
     @patch("feishu_group_to_base.send_task_card")
     @patch("feishu_group_to_base.alert_creator")
     @patch("feishu_group_to_base.write_record_with_fallback")
+    def test_card_send_failure_alert_includes_assignee_identity(
+        self,
+        write_record,
+        alert_creator,
+        send_task_card,
+    ):
+        write_record.return_value = "rec_123"
+        send_task_card.side_effect = RuntimeError("Bot has NO availability to this user.")
+        event = {
+            "header": {"event_type": "im.message.receive_v1"},
+            "event": {
+                "message": {
+                    "chat_id": "test_chat_id",
+                    "content": "{\"text\":\"@_user_1 @_user_2 7757救援\"}",
+                    "create_time": "1777952509450",
+                    "mentions": [
+                        {
+                            "id": {"open_id": "test_bot_open_id"},
+                            "key": "@_user_1",
+                            "mentioned_type": "bot",
+                            "name": "救援工单",
+                            "tenant_key": "tenant_app",
+                        },
+                        {
+                            "id": {"open_id": "test_user_open_id"},
+                            "key": "@_user_2",
+                            "mentioned_type": "user",
+                            "name": "外部执行人",
+                            "tenant_key": "tenant_external",
+                        },
+                    ],
+                    "message_id": "om_card_fail",
+                    "message_type": "text",
+                }
+            },
+        }
+
+        with self.assertRaises(RuntimeError):
+            handle_event(event, set(), set(), "lark-cli.cmd")
+
+        self.assertIn("目标执行人：外部执行人", alert_creator.call_args.kwargs["reason"])
+        self.assertIn("open_id=test_user_open_id", alert_creator.call_args.kwargs["reason"])
+        self.assertIn("tenant_key=tenant_external", alert_creator.call_args.kwargs["reason"])
+
+    @patch("feishu_group_to_base.send_task_card")
+    @patch("feishu_group_to_base.alert_creator")
+    @patch("feishu_group_to_base.write_record_with_fallback")
     def test_message_without_bot_mention_is_ignored(
         self,
         write_record,

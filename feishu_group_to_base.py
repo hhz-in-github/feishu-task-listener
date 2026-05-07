@@ -256,6 +256,7 @@ def handle_event(
 
     record = parse_event(event)
     assignee_open_id = _first_user_mention_open_id(mentions)
+    assignee_identity = _first_user_mention_summary(mentions)
     original_message = str(record.get("消息原文") or _replace_mentions(
         _extract_text(message.get("content", "")),
         mentions,
@@ -301,11 +302,12 @@ def handle_event(
                     )
                 except RuntimeError as exc:
                     if not alerted:
+                        detail = f"；目标执行人：{assignee_identity}" if assignee_identity else ""
                         alert_creator(
                             chat_id,
                             original_message,
                             lark_cli,
-                            reason=f"消息卡片发送失败：{exc}",
+                            reason=f"消息卡片发送失败：{exc}{detail}",
                             dedupe_key=f"message:{message_id}:card_send",
                         )
                         alerted = True
@@ -949,6 +951,22 @@ def _first_user_mention_open_id(mentions: list[dict[str, Any]]) -> str | None:
         if open_id:
             return str(open_id)
     return None
+
+
+def _first_user_mention_summary(mentions: list[dict[str, Any]]) -> str:
+    for mention in mentions:
+        if mention.get("mentioned_type") != "user":
+            continue
+        name = str(mention.get("name") or "未知用户")
+        open_id = str(mention.get("id", {}).get("open_id") or "")
+        tenant_key = str(mention.get("tenant_key") or "")
+        parts = [name]
+        if open_id:
+            parts.append(f"open_id={open_id}")
+        if tenant_key:
+            parts.append(f"tenant_key={tenant_key}")
+        return "，".join(parts)
+    return ""
 
 
 def _mentions_bot(mentions: list[dict[str, Any]]) -> bool:
