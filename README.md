@@ -26,6 +26,21 @@ copy feishu_config.example.json feishu_config.json
 
 ## 运行
 
+如果同一个飞书机器人同时负责群工单和洗车提醒，只能启动统一入口，不能同时启动两个独立监听脚本：
+
+```cmd
+python feishu_automation_hub.py
+python feishu_automation_hub.py --status
+```
+
+统一入口会监听：
+
+- `im.message.receive_v1`：转给群工单逻辑
+- `drive.file.bitable_record_changed_v1`：转给洗车新增记录逻辑
+- `card.action.trigger`：按按钮 action 分流，`claim/resolve` 走群工单，`accept/done` 走洗车
+
+旧的独立启动方式只适合单独运行群工单业务：
+
 ```cmd
 start_listener.cmd
 status_listener.cmd
