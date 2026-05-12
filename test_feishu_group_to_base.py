@@ -87,6 +87,38 @@ class ParseEventTests(unittest.TestCase):
         self.assertNotIn("任务类型", record)
         self.assertIn("备注", record)
 
+    def test_vehicle_number_is_optional_when_other_fields_exist(self):
+        event = {
+            "event": {
+                "message": {
+                    "content": "{\"text\":\"@_user_1 @_user_2 救援，换电\"}",
+                    "create_time": "1777917532650",
+                    "mentions": [
+                        {
+                            "key": "@_user_1",
+                            "mentioned_type": "bot",
+                            "name": "救援工单",
+                            "id": {"open_id": "test_bot_open_id"},
+                        },
+                        {
+                            "key": "@_user_2",
+                            "mentioned_type": "user",
+                            "name": "陈福艳",
+                            "id": {"open_id": "test_user_open_id"},
+                        },
+                    ],
+                    "message_id": "om_no_vehicle",
+                }
+            }
+        }
+
+        record = parse_event(event)
+
+        self.assertNotIn("车牌号", record)
+        self.assertEqual(record["执行人"], [{"id": "test_user_open_id"}])
+        self.assertEqual(record["任务类型"], ["救援", "换电"])
+        self.assertNotIn("备注", record)
+
     def test_builds_interactive_card_with_record_actions(self):
         record = {
             "消息原文": "@救援工单 @陈福艳 0412救援，换电",
@@ -236,10 +268,55 @@ class ParseEventTests(unittest.TestCase):
             "test_chat_id",
             "@救援工单 @黄贵杰 11115545695842，测试异常情况",
             "lark-cli.cmd",
-            reason="未识别车牌号；未识别任务类型",
+            reason="未识别任务类型",
             dedupe_key="message:om_missing:incomplete",
         )
         send_task_card.assert_not_called()
+
+    @patch("feishu_group_to_base.send_task_card")
+    @patch("feishu_group_to_base.alert_creator")
+    @patch("feishu_group_to_base.write_record_with_fallback")
+    def test_missing_vehicle_still_sends_task_card(
+        self,
+        write_record,
+        alert_creator,
+        send_task_card,
+    ):
+        write_record.return_value = "rec_123"
+        event = {
+            "header": {"event_type": "im.message.receive_v1"},
+            "event": {
+                "message": {
+                    "chat_id": "test_chat_id",
+                    "content": "{\"text\":\"@_user_1 @_user_2 救援，换电\"}",
+                    "create_time": "1777952509450",
+                    "mentions": [
+                        {
+                            "id": {"open_id": "test_bot_open_id"},
+                            "key": "@_user_1",
+                            "mentioned_type": "bot",
+                            "name": "救援工单",
+                        },
+                        {
+                            "id": {"open_id": "test_user_open_id"},
+                            "key": "@_user_2",
+                            "mentioned_type": "user",
+                            "name": "黄贵杰",
+                        },
+                    ],
+                    "message_id": "om_no_vehicle_send",
+                    "message_type": "text",
+                }
+            },
+        }
+
+        handle_event(event, set(), set(), "lark-cli.cmd")
+
+        alert_creator.assert_not_called()
+        send_task_card.assert_called_once()
+        sent_record = send_task_card.call_args.kwargs["record"]
+        self.assertNotIn("车牌号", sent_record)
+        self.assertNotIn("备注", sent_record)
 
     @patch("feishu_group_to_base.send_task_card")
     @patch("feishu_group_to_base.alert_creator")

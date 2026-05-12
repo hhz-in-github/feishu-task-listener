@@ -152,8 +152,6 @@ def parse_event(raw_event: dict[str, Any]) -> dict[str, Any]:
     notes = []
     if not assignee_open_id:
         notes.append("未识别执行人")
-    if not vehicle:
-        notes.append("未识别车牌号")
     if not task_types:
         notes.append("未识别任务类型")
     if notes:
