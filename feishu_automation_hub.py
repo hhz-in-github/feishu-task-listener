@@ -27,7 +27,6 @@ def run_listener(lark_cli: str, dry_run: bool = False) -> None:
 
     if not dry_run:
         car_wash.ensure_required_fields(lark_cli)
-    car_wash.start_polling_thread(car_processed_record_ids, lark_cli, dry_run=dry_run)
 
     command = [
         lark_cli,

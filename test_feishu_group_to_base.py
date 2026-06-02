@@ -659,6 +659,22 @@ class ParseEventTests(unittest.TestCase):
         self.assertIn('"content": "异常处理"', content)
         self.assertIn("机器人发送测试", content)
 
+    @patch("feishu_group_to_base.APP_ADMIN_OPEN_IDS", ["admin_1", BOT_CREATOR_OPEN_ID, "admin_2"])
+    @patch("feishu_group_to_base.subprocess.run")
+    @patch("feishu_group_to_base.get_chat_name")
+    def test_alert_creator_sends_to_creator_and_app_admins(self, get_chat_name, run):
+        get_chat_name.return_value = "测试用"
+        run.return_value.returncode = 0
+        run.return_value.stdout = "{}"
+
+        alert_creator("test_chat_id", "管理员通知测试", "lark-cli.cmd")
+
+        user_ids = [
+            call.args[0][call.args[0].index("--user-id") + 1]
+            for call in run.call_args_list
+        ]
+        self.assertEqual(user_ids, [BOT_CREATOR_OPEN_ID, "admin_1", "admin_2"])
+
     def test_send_task_card_does_not_fallback_to_group_chat(self):
         with patch("feishu_group_to_base.send_card_to_user") as send_user:
             send_user.side_effect = RuntimeError("Bot has NO availability to this user.")

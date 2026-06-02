@@ -17,6 +17,7 @@ DEFAULT_CONFIG = {
     "table_id": "YOUR_TABLE_ID",
     "base_host": "https://your-tenant.feishu.cn",
     "bot_creator_open_id": "YOUR_BOT_CREATOR_OPEN_ID",
+    "app_admin_open_ids": [],
     "timezone": "Asia/Shanghai",
     "structured_log_path": "events/automation.jsonl",
     "health_path": "runtime_health.json",
@@ -55,6 +56,21 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     return config
 
 
+def open_id_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        candidates = [value]
+    elif isinstance(value, list):
+        candidates = value
+    else:
+        candidates = []
+    open_ids: list[str] = []
+    for candidate in candidates:
+        open_id = str(candidate).strip()
+        if open_id and open_id not in open_ids:
+            open_ids.append(open_id)
+    return open_ids
+
+
 def load_task_type_specs(path: Path = TASK_TYPES_PATH) -> list[dict[str, Any]]:
     if not path.exists():
         return DEFAULT_TASK_TYPE_SPECS
@@ -79,6 +95,7 @@ TABLE_ID = str(CONFIG["table_id"])
 BASE_HOST = str(CONFIG["base_host"]).rstrip("/")
 TIMEZONE = ZoneInfo(str(CONFIG["timezone"]))
 BOT_CREATOR_OPEN_ID = str(CONFIG["bot_creator_open_id"])
+APP_ADMIN_OPEN_IDS = open_id_list(CONFIG.get("app_admin_open_ids"))
 
 PROCESSED_LOG = Path(str(CONFIG["processed_message_path"]))
 PROCESSED_CARD_ACTION_LOG = Path(str(CONFIG["processed_card_action_path"]))
@@ -534,39 +551,60 @@ def alert_creator(
         return
     chat_name = get_chat_name(chat_id, lark_cli) if chat_id else "未知群聊"
     card = build_creator_alert_card(chat_name, original_message, reason)
-    result = subprocess.run(
-        [
-            lark_cli,
-            "im",
-            "+messages-send",
-            "--as",
-            "bot",
-            "--user-id",
-            BOT_CREATOR_OPEN_ID,
-            "--msg-type",
-            "interactive",
-            "--content",
-            json.dumps(card, ensure_ascii=False),
-        ],
-        text=True,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
-    if result.returncode != 0:
-        print(
-            "Failed to alert bot creator\n"
-            f"STDOUT:\n{result.stdout}\n"
-            f"STDERR:\n{result.stderr}",
-            file=sys.stderr,
+    recipients = alert_recipient_open_ids()
+    if not recipients:
+        print("Skip creator alert: no alert recipients configured", file=sys.stderr)
+        return
+    sent_recipients: list[str] = []
+    for recipient_open_id in recipients:
+        result = subprocess.run(
+            [
+                lark_cli,
+                "im",
+                "+messages-send",
+                "--as",
+                "bot",
+                "--user-id",
+                recipient_open_id,
+                "--msg-type",
+                "interactive",
+                "--content",
+                json.dumps(card, ensure_ascii=False),
+            ],
+            text=True,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
         )
+        if result.returncode != 0:
+            print(
+                "Failed to alert app admin\n"
+                f"RECIPIENT:\n{recipient_open_id}\n"
+                f"STDOUT:\n{result.stdout}\n"
+                f"STDERR:\n{result.stderr}",
+                file=sys.stderr,
+            )
+            continue
+        sent_recipients.append(recipient_open_id)
+        print(result.stdout.strip(), file=sys.stderr)
+    if not sent_recipients:
         return
     if dedupe_key:
         _append_id(PROCESSED_ALERT_LOG, dedupe_key)
     update_health(last_alert_success_at=now_iso())
-    log_event("creator_alert_sent", chat_id=chat_id, chat_name=chat_name, reason=reason)
-    print(result.stdout.strip(), file=sys.stderr)
+    log_event(
+        "creator_alert_sent",
+        chat_id=chat_id,
+        chat_name=chat_name,
+        reason=reason,
+        recipients=sent_recipients,
+    )
+
+
+def alert_recipient_open_ids() -> list[str]:
+    recipients = open_id_list([BOT_CREATOR_OPEN_ID, *APP_ADMIN_OPEN_IDS])
+    return recipients
 
 
 def build_creator_alert_text(chat_name: str, original_message: str) -> str:

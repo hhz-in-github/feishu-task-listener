@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import feishu_automation_hub as hub
@@ -57,6 +58,22 @@ class FeishuAutomationHubTests(unittest.TestCase):
 
         car_handler.assert_called_once()
         group_handler.assert_not_called()
+
+    def test_run_listener_does_not_start_car_wash_polling(self):
+        process = MagicMock()
+        process.stdout = []
+        process.__enter__.return_value = process
+        process.__exit__.return_value = None
+
+        with patch.object(hub.group_tasks, "_load_processed_ids", return_value=set()), \
+            patch.object(hub.group_tasks, "_load_ids", return_value=set()), \
+            patch.object(hub.car_wash, "load_ids", return_value=set()), \
+            patch.object(hub.car_wash, "ensure_required_fields"), \
+            patch.object(hub.car_wash, "start_polling_thread") as start_polling, \
+            patch.object(hub.subprocess, "Popen", return_value=process):
+            hub.run_listener("lark-cli", dry_run=False)
+
+        start_polling.assert_not_called()
 
 
 if __name__ == "__main__":
