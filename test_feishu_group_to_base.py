@@ -119,6 +119,35 @@ class ParseEventTests(unittest.TestCase):
         self.assertEqual(record["任务类型"], ["救援", "换电"])
         self.assertNotIn("备注", record)
 
+    def test_maps_energy_task_type_to_existing_base_option(self):
+        event = {
+            "event": {
+                "message": {
+                    "content": "{\"text\":\"@_user_1 @_user_2 7757充换电\"}",
+                    "create_time": "1777917532650",
+                    "mentions": [
+                        {
+                            "key": "@_user_1",
+                            "mentioned_type": "bot",
+                            "name": "救援工单",
+                            "id": {"open_id": "test_bot_open_id"},
+                        },
+                        {
+                            "key": "@_user_2",
+                            "mentioned_type": "user",
+                            "name": "陈福艳",
+                            "id": {"open_id": "test_user_open_id"},
+                        },
+                    ],
+                    "message_id": "om_energy",
+                }
+            }
+        }
+
+        record = parse_event(event)
+
+        self.assertEqual(record["任务类型"], ["充换电/带电/充电/换电"])
+
     def test_builds_interactive_card_with_record_actions(self):
         record = {
             "消息原文": "@救援工单 @陈福艳 0412救援，换电",
@@ -420,13 +449,14 @@ class ParseEventTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             handle_card_action_event(event, set(), "lark-cli.cmd")
 
-        alert_creator.assert_called_once_with(
-            "test_chat_id",
-            "@救援工单 @陈福艳 0412救援，换电",
-            "lark-cli.cmd",
-            reason="按钮回写失败：base update failed",
-            dedupe_key="card_action:evt_1:resolve",
-        )
+        alert_creator.assert_called_once()
+        args, kwargs = alert_creator.call_args
+        self.assertEqual(args, ("test_chat_id", "@救援工单 @陈福艳 0412救援，换电", "lark-cli.cmd"))
+        self.assertEqual(kwargs["dedupe_key"], "card_action:evt_1:resolve")
+        self.assertIn("按钮回写失败：base update failed", kwargs["reason"])
+        self.assertIn("record_id=rec_123", kwargs["reason"])
+        self.assertIn("\"任务解决时间\":", kwargs["reason"])
+        self.assertIn("\"任务状态\": \"已解决\"", kwargs["reason"])
 
     def test_parses_record_id_from_nested_upsert_output(self):
         output = """
@@ -640,6 +670,33 @@ class ParseEventTests(unittest.TestCase):
                     record_id="rec_1",
                     lark_cli="lark-cli.cmd",
                 )
+
+    @patch("feishu_group_to_base.time.sleep")
+    @patch("feishu_group_to_base.subprocess.run")
+    def test_send_task_card_retries_transient_504(self, run, sleep):
+        failed = unittest.mock.Mock()
+        failed.returncode = 1
+        failed.stdout = ""
+        failed.stderr = (
+            '{"ok": false, "error": {"type": "network", '
+            '"subtype": "transport", '
+            '"message": "API call failed: TAT API returned HTTP 504"}}'
+        )
+        succeeded = unittest.mock.Mock()
+        succeeded.returncode = 0
+        succeeded.stdout = "{}"
+        succeeded.stderr = ""
+        run.side_effect = [failed, succeeded]
+
+        send_task_card(
+            assignee_open_id="test_user_open_id",
+            record={"消息原文": "x"},
+            record_id="rec_1",
+            lark_cli="lark-cli.cmd",
+        )
+
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -32,13 +33,12 @@ DEFAULT_TASK_TYPE_SPECS = [
     {"name": "抬杆识别车牌", "keywords": ["抬杆识别车牌", "抬杆"]},
     {"name": "兜底送货", "keywords": ["兜底送货"]},
     {"name": "阻塞交通", "keywords": ["阻塞交通"]},
-    {"name": "充换电", "keywords": ["充换电", "补能"]},
+    {"name": "充换电/带电/充电/换电", "keywords": ["充换电", "带电", "充电", "补能"]},
     {"name": "插拔电", "keywords": ["插拔电"]},
     {"name": "开关门", "keywords": ["开关门"]},
     {"name": "事故", "keywords": ["事故"]},
     {"name": "其他", "keywords": ["其他"]},
     {"name": "救援", "keywords": ["救援"]},
-    {"name": "充电", "keywords": ["充电"]},
     {"name": "换电", "keywords": ["换电", "换电池", "更换电池"]},
     {"name": "故障", "keywords": ["故障"]},
     {"name": "轮胎", "keywords": ["轮胎"]},
@@ -395,7 +395,10 @@ def handle_card_action_event(
             reason = (
                 build_user_authorization_alert_reason()
                 if is_user_authorization_error(str(exc))
-                else f"按钮回写失败：{exc}"
+                else (
+                    f"按钮回写失败：{exc}；record_id={action['record_id']}；"
+                    f"update={json.dumps(update, ensure_ascii=False)}"
+                )
             )
             alert_creator(
                 action.get("群聊ID"),
@@ -655,25 +658,41 @@ def send_card_to_user(
 
 
 def _send_card(target_args: list[str], card: dict[str, Any], lark_cli: str) -> None:
-    result = subprocess.run(
-        [
-            lark_cli,
-            "im",
-            "+messages-send",
-            *target_args,
-            "--msg-type",
-            "interactive",
-            "--content",
-            json.dumps(card, ensure_ascii=False),
-            "--as",
-            "bot",
-        ],
-        text=True,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
+    command = [
+        lark_cli,
+        "im",
+        "+messages-send",
+        *target_args,
+        "--msg-type",
+        "interactive",
+        "--content",
+        json.dumps(card, ensure_ascii=False),
+        "--as",
+        "bot",
+    ]
+    result = None
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        result = subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if result.returncode == 0:
+            break
+        if attempt >= max_attempts or not is_transient_transport_error(result.stderr):
+            break
+        log_event(
+            "task_card_send_retry",
+            attempt=attempt,
+            max_attempts=max_attempts,
+            stderr=result.stderr,
+        )
+        time.sleep(attempt)
+    assert result is not None
     if result.returncode != 0:
         raise RuntimeError(
             "Failed to send task card\n"
@@ -687,6 +706,20 @@ def _send_card(target_args: list[str], card: dict[str, Any], lark_cli: str) -> N
 
 def is_bot_availability_error(message: str) -> bool:
     return "Bot has NO availability to this user" in message
+
+
+def is_transient_transport_error(message: str) -> bool:
+    lowered = message.lower()
+    markers = (
+        "http 504",
+        "tat api returned http 504",
+        '"type": "network"',
+        '"subtype": "transport"',
+        "transport",
+        "timeout",
+        "timed out",
+    )
+    return any(marker in lowered for marker in markers)
 
 
 def is_user_authorization_error(message: str) -> bool:
@@ -987,6 +1020,8 @@ def _extract_task_types(text: str) -> list[str]:
             continue
         if any(str(keyword) and str(keyword) in text for keyword in keywords):
             matched.append(name)
+    if "充换电/带电/充电/换电" in matched:
+        matched = [name for name in matched if name not in {"充电", "换电"}]
     return matched
 
 
