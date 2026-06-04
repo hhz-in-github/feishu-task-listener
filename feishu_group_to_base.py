@@ -603,7 +603,7 @@ def alert_creator(
 
 
 def alert_recipient_open_ids() -> list[str]:
-    recipients = open_id_list([BOT_CREATOR_OPEN_ID, *APP_ADMIN_OPEN_IDS])
+    recipients = open_id_list(APP_ADMIN_OPEN_IDS)
     return recipients
 
 

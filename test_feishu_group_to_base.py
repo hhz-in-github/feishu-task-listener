@@ -629,6 +629,7 @@ class ParseEventTests(unittest.TestCase):
             f"{BASE_HOST}/base/{BASE_TOKEN}?table={TABLE_ID}&record=rec_123",
         )
 
+    @patch("feishu_group_to_base.APP_ADMIN_OPEN_IDS", ["admin_1"])
     @patch("feishu_group_to_base.subprocess.run")
     @patch("feishu_group_to_base.get_chat_name")
     def test_alert_creator_sends_exception_card_as_bot(self, get_chat_name, run):
@@ -648,7 +649,7 @@ class ParseEventTests(unittest.TestCase):
                 "--as",
                 "bot",
                 "--user-id",
-                BOT_CREATOR_OPEN_ID,
+                "admin_1",
                 "--msg-type",
                 "interactive",
                 "--content",
@@ -659,10 +660,10 @@ class ParseEventTests(unittest.TestCase):
         self.assertIn('"content": "异常处理"', content)
         self.assertIn("机器人发送测试", content)
 
-    @patch("feishu_group_to_base.APP_ADMIN_OPEN_IDS", ["admin_1", BOT_CREATOR_OPEN_ID, "admin_2"])
+    @patch("feishu_group_to_base.APP_ADMIN_OPEN_IDS", ["admin_1", "admin_2", "admin_1"])
     @patch("feishu_group_to_base.subprocess.run")
     @patch("feishu_group_to_base.get_chat_name")
-    def test_alert_creator_sends_to_creator_and_app_admins(self, get_chat_name, run):
+    def test_alert_creator_sends_to_app_admins_without_duplicates(self, get_chat_name, run):
         get_chat_name.return_value = "测试用"
         run.return_value.returncode = 0
         run.return_value.stdout = "{}"
@@ -673,7 +674,7 @@ class ParseEventTests(unittest.TestCase):
             call.args[0][call.args[0].index("--user-id") + 1]
             for call in run.call_args_list
         ]
-        self.assertEqual(user_ids, [BOT_CREATOR_OPEN_ID, "admin_1", "admin_2"])
+        self.assertEqual(user_ids, ["admin_1", "admin_2"])
 
     def test_send_task_card_does_not_fallback_to_group_chat(self):
         with patch("feishu_group_to_base.send_card_to_user") as send_user:
