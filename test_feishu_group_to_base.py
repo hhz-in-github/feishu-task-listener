@@ -1,3 +1,4 @@
+import json
 import unittest
 from unittest.mock import patch
 
@@ -7,6 +8,8 @@ from feishu_group_to_base import (
     BOT_CREATOR_OPEN_ID,
     TABLE_ID,
     alert_creator,
+    extract_app_admin_open_ids,
+    fetch_app_admin_open_ids,
     build_creator_alert_card,
     build_base_record_url,
     build_base_table_url,
@@ -629,10 +632,10 @@ class ParseEventTests(unittest.TestCase):
             f"{BASE_HOST}/base/{BASE_TOKEN}?table={TABLE_ID}&record=rec_123",
         )
 
-    @patch("feishu_group_to_base.APP_ADMIN_OPEN_IDS", ["admin_1"])
+    @patch("feishu_group_to_base.cached_app_admin_open_ids", return_value=["admin_1"])
     @patch("feishu_group_to_base.subprocess.run")
     @patch("feishu_group_to_base.get_chat_name")
-    def test_alert_creator_sends_exception_card_as_bot(self, get_chat_name, run):
+    def test_alert_creator_sends_exception_card_as_bot(self, get_chat_name, run, cached_admins):
         get_chat_name.return_value = "测试用"
         run.return_value.returncode = 0
         run.return_value.stdout = "{}"
@@ -660,10 +663,10 @@ class ParseEventTests(unittest.TestCase):
         self.assertIn('"content": "异常处理"', content)
         self.assertIn("机器人发送测试", content)
 
-    @patch("feishu_group_to_base.APP_ADMIN_OPEN_IDS", ["admin_1", "admin_2", "admin_1"])
+    @patch("feishu_group_to_base.cached_app_admin_open_ids", return_value=["admin_1", "admin_2"])
     @patch("feishu_group_to_base.subprocess.run")
     @patch("feishu_group_to_base.get_chat_name")
-    def test_alert_creator_sends_to_app_admins_without_duplicates(self, get_chat_name, run):
+    def test_alert_creator_sends_to_app_admins_without_duplicates(self, get_chat_name, run, cached_admins):
         get_chat_name.return_value = "测试用"
         run.return_value.returncode = 0
         run.return_value.stdout = "{}"
@@ -675,6 +678,31 @@ class ParseEventTests(unittest.TestCase):
             for call in run.call_args_list
         ]
         self.assertEqual(user_ids, ["admin_1", "admin_2"])
+
+    def test_extracts_app_admin_open_ids_from_api_payload(self):
+        payload = {
+            "code": 0,
+            "data": {
+                "user_list": [
+                    {"open_id": "admin_1"},
+                    {"open_id": "admin_2"},
+                    {"open_id": "admin_1"},
+                ]
+            },
+        }
+
+        self.assertEqual(extract_app_admin_open_ids(payload), ["admin_1", "admin_2"])
+
+    @patch("feishu_group_to_base.subprocess.run")
+    def test_fetches_app_admin_open_ids(self, run):
+        run.return_value.returncode = 0
+        run.return_value.stdout = json.dumps(
+            {"data": {"user_list": [{"open_id": "admin_1"}, {"open_id": "admin_2"}]}}
+        )
+        run.return_value.stderr = ""
+
+        self.assertEqual(fetch_app_admin_open_ids("lark-cli.cmd"), ["admin_1", "admin_2"])
+        self.assertIn("/open-apis/user/v4/app_admin_user/list", run.call_args.args[0])
 
     def test_send_task_card_does_not_fallback_to_group_chat(self):
         with patch("feishu_group_to_base.send_card_to_user") as send_user:

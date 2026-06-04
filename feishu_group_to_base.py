@@ -3,6 +3,7 @@ import json
 import re
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +26,8 @@ DEFAULT_CONFIG = {
     "processed_card_action_path": "processed_card_action_ids.txt",
     "processed_alert_path": "processed_alert_ids.txt",
     "raw_event_path": "runtime_events.ndjson",
+    "app_admin_cache_path": "app_admin_open_ids_cache.json",
+    "app_admin_refresh_interval_seconds": 86400,
 }
 DEFAULT_TASK_TYPE_SPECS = [
     {"name": "被堵住出不来（保安/警戒线/锥桶）", "keywords": ["被堵住出不来", "保安", "警戒线", "锥桶"]},
@@ -103,6 +106,8 @@ PROCESSED_ALERT_LOG = Path(str(CONFIG["processed_alert_path"]))
 RAW_EVENT_LOG = Path(str(CONFIG["raw_event_path"]))
 STRUCTURED_LOG = Path(str(CONFIG["structured_log_path"]))
 HEALTH_PATH = Path(str(CONFIG["health_path"]))
+APP_ADMIN_CACHE_PATH = Path(str(CONFIG["app_admin_cache_path"]))
+APP_ADMIN_REFRESH_INTERVAL_SECONDS = int(CONFIG.get("app_admin_refresh_interval_seconds") or 86400)
 
 
 def now_iso() -> str:
@@ -188,6 +193,8 @@ def run_listener(lark_cli: str, dry_run: bool = False) -> None:
         last_error_at="",
     )
     log_event("listener_starting", lark_cli=lark_cli, dry_run=dry_run)
+    if not dry_run:
+        start_app_admin_refresh_thread(lark_cli)
     command = [
         lark_cli,
         "event",
@@ -551,7 +558,7 @@ def alert_creator(
         return
     chat_name = get_chat_name(chat_id, lark_cli) if chat_id else "未知群聊"
     card = build_creator_alert_card(chat_name, original_message, reason)
-    recipients = alert_recipient_open_ids()
+    recipients = alert_recipient_open_ids(lark_cli)
     if not recipients:
         print("Skip creator alert: no alert recipients configured", file=sys.stderr)
         return
@@ -602,9 +609,127 @@ def alert_creator(
     )
 
 
-def alert_recipient_open_ids() -> list[str]:
-    recipients = open_id_list(APP_ADMIN_OPEN_IDS)
-    return recipients
+def alert_recipient_open_ids(lark_cli: str | None = None) -> list[str]:
+    if lark_cli:
+        return cached_app_admin_open_ids(lark_cli)
+    return open_id_list(APP_ADMIN_OPEN_IDS)
+
+
+def start_app_admin_refresh_thread(lark_cli: str) -> None:
+    thread = threading.Thread(
+        target=refresh_app_admins_forever,
+        args=(lark_cli,),
+        daemon=True,
+    )
+    thread.start()
+    log_event("app_admin_refresh_thread_started", interval_seconds=APP_ADMIN_REFRESH_INTERVAL_SECONDS)
+
+
+def refresh_app_admins_forever(lark_cli: str) -> None:
+    while True:
+        try:
+            refresh_app_admin_cache(lark_cli, force=True)
+        except RuntimeError as exc:
+            log_event("app_admin_refresh_failed", error=str(exc))
+        time.sleep(max(APP_ADMIN_REFRESH_INTERVAL_SECONDS, 60))
+
+
+def cached_app_admin_open_ids(lark_cli: str) -> list[str]:
+    cached = read_app_admin_cache()
+    if cached and not app_admin_cache_expired(cached):
+        return open_id_list(cached.get("open_ids"))
+    try:
+        return refresh_app_admin_cache(lark_cli, force=True)
+    except RuntimeError as exc:
+        log_event("app_admin_refresh_failed", error=str(exc))
+    if cached:
+        return open_id_list(cached.get("open_ids"))
+    return open_id_list(APP_ADMIN_OPEN_IDS)
+
+
+def refresh_app_admin_cache(lark_cli: str, force: bool = False) -> list[str]:
+    cached = read_app_admin_cache()
+    if cached and not force and not app_admin_cache_expired(cached):
+        return open_id_list(cached.get("open_ids"))
+    open_ids = fetch_app_admin_open_ids(lark_cli)
+    write_app_admin_cache(open_ids)
+    return open_ids
+
+
+def fetch_app_admin_open_ids(lark_cli: str) -> list[str]:
+    result = subprocess.run(
+        [
+            lark_cli,
+            "api",
+            "GET",
+            "/open-apis/user/v4/app_admin_user/list",
+            "--as",
+            "bot",
+        ],
+        text=True,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "Failed to query app admins\n"
+            f"STDOUT:\n{result.stdout}\n"
+            f"STDERR:\n{result.stderr}"
+        )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Unable to parse app admin output: {result.stdout}") from exc
+    open_ids = extract_app_admin_open_ids(payload)
+    if not open_ids:
+        raise RuntimeError(f"No app admin open_id found in output: {result.stdout}")
+    log_event("app_admin_cache_refreshed", admin_count=len(open_ids))
+    return open_ids
+
+
+def extract_app_admin_open_ids(payload: Any) -> list[str]:
+    if isinstance(payload, dict):
+        user_list = payload.get("user_list")
+        if isinstance(user_list, list):
+            return open_id_list([user.get("open_id") for user in user_list if isinstance(user, dict)])
+        for value in payload.values():
+            open_ids = extract_app_admin_open_ids(value)
+            if open_ids:
+                return open_ids
+    if isinstance(payload, list):
+        for item in payload:
+            open_ids = extract_app_admin_open_ids(item)
+            if open_ids:
+                return open_ids
+    return []
+
+
+def read_app_admin_cache() -> dict[str, Any] | None:
+    if not APP_ADMIN_CACHE_PATH.exists():
+        return None
+    try:
+        payload = json.loads(APP_ADMIN_CACHE_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def write_app_admin_cache(open_ids: list[str]) -> None:
+    APP_ADMIN_CACHE_PATH.write_text(
+        json.dumps({"updated_at": now_iso(), "open_ids": open_id_list(open_ids)}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def app_admin_cache_expired(cache: dict[str, Any]) -> bool:
+    updated_at = str(cache.get("updated_at") or "")
+    try:
+        updated = datetime.fromisoformat(updated_at)
+    except ValueError:
+        return True
+    return (datetime.now(TIMEZONE) - updated).total_seconds() >= APP_ADMIN_REFRESH_INTERVAL_SECONDS
 
 
 def build_creator_alert_text(chat_name: str, original_message: str) -> str:
