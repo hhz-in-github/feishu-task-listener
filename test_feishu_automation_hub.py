@@ -69,7 +69,6 @@ class FeishuAutomationHubTests(unittest.TestCase):
             patch.object(hub.group_tasks, "_load_ids", return_value=set()), \
             patch.object(hub.car_wash, "load_ids", return_value=set()), \
             patch.object(hub.car_wash, "ensure_required_fields"), \
-            patch.object(hub.group_tasks, "start_app_admin_refresh_thread"), \
             patch.object(hub.car_wash, "start_polling_thread") as start_polling, \
             patch.object(hub.subprocess, "Popen", return_value=process):
             hub.run_listener("lark-cli", dry_run=False)

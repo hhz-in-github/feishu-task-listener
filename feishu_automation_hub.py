@@ -27,7 +27,6 @@ def run_listener(lark_cli: str, dry_run: bool = False) -> None:
 
     if not dry_run:
         car_wash.ensure_required_fields(lark_cli)
-        group_tasks.start_app_admin_refresh_thread(lark_cli)
 
     command = [
         lark_cli,
