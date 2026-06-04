@@ -3,7 +3,7 @@
   "table_id": "YOUR_TABLE_ID",
   "base_host": "https://your-tenant.feishu.cn",
   "bot_creator_open_id": "YOUR_BOT_CREATOR_OPEN_ID",
-  "app_admin_open_ids": ["APP_ADMIN_OPEN_ID_1", "APP_ADMIN_OPEN_ID_2"],
+  "app_admin_open_ids": ["ou_010e387e623241986662a19ea4ea5d97"],
   "timezone": "Asia/Shanghai",
   "structured_log_path": "events/automation.jsonl",
   "health_path": "runtime_health.json",
