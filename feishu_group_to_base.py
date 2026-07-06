@@ -876,12 +876,29 @@ def build_task_card(
             chat_id=chat_id,
         ),
     }
+    arrived_button = {
+        "tag": "button",
+        "text": {"tag": "plain_text", "content": "已到目标地点"},
+        "type": "primary",
+        "value": _button_value(
+            action="arrived",
+            record_id=record_id,
+            vehicle=vehicle,
+            task_type_text=task_type_text,
+            published_at=published_at,
+            original=original,
+            chat_id=chat_id,
+        ),
+    }
     if "claim" in disabled_actions:
         claim_button["disabled"] = True
+    if "arrived" in disabled_actions:
+        arrived_button["disabled"] = True
     if "resolve" in disabled_actions:
         resolve_button["disabled"] = True
     actions = [
         claim_button,
+        arrived_button,
         resolve_button,
     ]
 
@@ -960,6 +977,8 @@ def build_base_record_url(record_id: str) -> str:
 def location_fill_label(action: str) -> str:
     if action == "claim":
         return "出发位置"
+    if action == "arrived":
+        return "到达目标位置"
     if action == "resolve":
         return "救援结束位置"
     raise ValueError(f"Unsupported location fill action: {action}")
@@ -971,7 +990,7 @@ def parse_card_action(event: dict[str, Any]) -> dict[str, str] | None:
         return None
     action = value.get("action")
     record_id = value.get("record_id")
-    if action not in {"claim", "resolve"} or not record_id:
+    if action not in {"claim", "arrived", "resolve"} or not record_id:
         return None
     parsed = {"action": str(action), "record_id": str(record_id)}
     message_id = _find_message_id(event)
@@ -987,6 +1006,8 @@ def build_action_update(action: str) -> dict[str, Any]:
     now = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
     if action == "claim":
         return {"任务领取时间": now, "任务状态": "处理中"}
+    if action == "arrived":
+        return {"到达目标时间": now, "任务状态": "处理中"}
     if action == "resolve":
         return {"任务解决时间": now, "任务状态": "已解决"}
     raise ValueError(f"Unsupported action: {action}")
@@ -995,8 +1016,10 @@ def build_action_update(action: str) -> dict[str, Any]:
 def disabled_actions_for(action: str) -> set[str]:
     if action == "claim":
         return {"claim"}
+    if action == "arrived":
+        return {"claim", "arrived"}
     if action == "resolve":
-        return {"claim", "resolve"}
+        return {"claim", "arrived", "resolve"}
     return set()
 
 

@@ -15,7 +15,7 @@ HUB_EVENT_TYPES = ",".join(
         "drive.file.bitable_record_changed_v1",
     ]
 )
-GROUP_CARD_ACTIONS = {"claim", "resolve"}
+GROUP_CARD_ACTIONS = {"claim", "arrived", "resolve"}
 CAR_WASH_CARD_ACTIONS = {"accept", "done"}
 
 
