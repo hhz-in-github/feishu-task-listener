@@ -18,6 +18,7 @@ DEFAULT_CONFIG = {
     "base_host": "https://your-tenant.feishu.cn",
     "bot_creator_open_id": "YOUR_BOT_CREATOR_OPEN_ID",
     "app_admin_open_ids": ["ou_010e387e623241986662a19ea4ea5d97", "ou_7a8bdba3621140c79a7b25867ff1e34c"],
+    "dev_alert_chat_id": "oc_9f2704f534491b2baccacb736bf57e05",
     "timezone": "Asia/Shanghai",
     "structured_log_path": "events/automation.jsonl",
     "health_path": "runtime_health.json",
@@ -96,6 +97,7 @@ BASE_HOST = str(CONFIG["base_host"]).rstrip("/")
 TIMEZONE = ZoneInfo(str(CONFIG["timezone"]))
 BOT_CREATOR_OPEN_ID = str(CONFIG["bot_creator_open_id"])
 APP_ADMIN_OPEN_IDS = open_id_list(CONFIG.get("app_admin_open_ids"))
+DEV_ALERT_CHAT_ID = str(CONFIG.get("dev_alert_chat_id") or "").strip()
 
 PROCESSED_LOG = Path(str(CONFIG["processed_message_path"]))
 PROCESSED_CARD_ACTION_LOG = Path(str(CONFIG["processed_card_action_path"]))
@@ -600,6 +602,51 @@ def alert_creator(
         reason=reason,
         recipients=sent_recipients,
     )
+
+
+def alert_dev_group(reason: str, lark_cli: str, context: str | None = None) -> None:
+    """向运维群发送一条纯文本告警。
+
+    这是监听器的"安全网"：任何单条事件处理失败都会调用它告警后继续监听，
+    因此本函数自身绝不抛异常（连发告警都失败也只记录，不向上传播），
+    确保它永远不会反过来拖垮长连接。
+    """
+    if not DEV_ALERT_CHAT_ID:
+        return
+    lines = ["⚠️ 救援工单监听处理异常（已自动跳过该条，监听继续运行）"]
+    if context:
+        lines.append(context)
+    lines.append(f"错误：{reason}")
+    text = "\n".join(lines)
+    try:
+        result = subprocess.run(
+            [
+                lark_cli,
+                "im",
+                "+messages-send",
+                "--as",
+                "bot",
+                "--chat-id",
+                DEV_ALERT_CHAT_ID,
+                "--text",
+                text,
+            ],
+            text=True,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if result.returncode != 0:
+            print(
+                f"Failed to alert dev group {DEV_ALERT_CHAT_ID}\nSTDERR:\n{result.stderr}",
+                file=sys.stderr,
+            )
+            log_event("dev_group_alert_failed", chat_id=DEV_ALERT_CHAT_ID, stderr=result.stderr)
+            return
+        log_event("dev_group_alert_sent", chat_id=DEV_ALERT_CHAT_ID, reason=reason)
+    except Exception as exc:  # noqa: BLE001 告警通道自身的异常必须吞掉
+        print(f"dev group alert exception: {exc}", file=sys.stderr)
 
 
 def alert_recipient_open_ids() -> list[str]:

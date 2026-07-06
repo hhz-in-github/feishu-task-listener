@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.log
+events/
+processed_*.txt
+runtime_*.json
+runtime_events.ndjson
+card_cache.json
+car_wash_config.json
+feishu_config.json
+.env

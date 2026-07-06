@@ -1,0 +1,30 @@
+{
+  "base_token": "LdiKbOgd7a5FSvsgNO5c0DNunTa",
+  "table_id": "tblaTXQqJNNAzMSS",
+  "target_chat_join_link": "https://applink.feishu.cn/client/chat/chatter/add_by_link?link_token=382sa608-24f7-40ab-96df-3b498c555855",
+  "target_chat_id": "",
+  "card_title": "洗车任务提醒",
+  "card_header_template": "blue",
+  "field_mapping": {
+    "plate_number": "车牌号",
+    "cleaning_need": "清洗需求",
+    "return_station_time": "到站时间",
+    "cleaner": "清洗人员",
+    "completed_at": "清洗完成时间",
+    "photo": "清洗照片",
+    "status": "任务状态",
+    "group_message_id": "群消息ID",
+    "private_message_id": "私聊消息ID"
+  },
+  "structured_log_path": "events/automation.jsonl",
+  "health_path": "runtime_health.json",
+  "processed_record_path": "processed_record_ids.txt",
+  "processed_card_action_path": "processed_card_action_ids.txt",
+  "card_cache_path": "card_cache.json",
+  "raw_event_path": "runtime_events.ndjson",
+  "event_types": "card.action.trigger,drive.file.bitable_record_changed_v1",
+  "plate_link_table_id": "tblkx9E9JqKpxbJL",
+  "plate_link_display_field": "车辆名称",
+  "poll_interval_seconds": 3,
+  "poll_send_existing_on_start": false
+}

@@ -75,12 +75,20 @@ def run_listener(lark_cli: str, dry_run: bool = False) -> None:
                     lark_cli,
                     dry_run=dry_run,
                 )
-            except RuntimeError as exc:
-                group_tasks.update_health(status="error", last_error=str(exc), last_error_at=group_tasks.now_iso())
-                car_wash.update_health(status="error", last_error=str(exc), last_error_at=car_wash.now_iso())
+            except Exception as exc:  # noqa: BLE001 单条事件失败不得拖垮整条长连接
+                # 记录错误但保持 status=running：进程仍在监听，只是这一条没处理成功。
+                group_tasks.update_health(status="running", last_error=str(exc), last_error_at=group_tasks.now_iso())
+                car_wash.update_health(status="running", last_error=str(exc), last_error_at=car_wash.now_iso())
                 group_tasks.log_event("hub_event_processing_failed", error=str(exc), event=event)
                 car_wash.log_event("hub_event_processing_failed", error=str(exc), event=event)
-                raise
+                event_type = str(event.get("header", {}).get("event_type") or "")
+                group_tasks.alert_dev_group(
+                    reason=str(exc),
+                    lark_cli=lark_cli,
+                    context=f"event_type={event_type}",
+                )
+                # 关键：不再 raise。跳过这一条，继续处理后续事件，长连接保持在线。
+                continue
 
 
 def route_event(
